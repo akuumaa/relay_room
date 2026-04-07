@@ -1,5 +1,5 @@
-import {Injectable, NotFoundException} from '@nestjs/common';
-import {randomUUID} from "node:crypto";
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from "node:crypto";
 
 export interface Room {
     id: string;
@@ -15,7 +15,7 @@ export class RoomService {
     createRoom(): Room {
         const room: Room = {
             id: randomUUID(),
-            code: this.generateRoomCode(),
+            code: this.generateUniqueRoomCode(),
             createdAt: new Date(),
             participants: new Set<string>(),
         }
@@ -51,6 +51,15 @@ export class RoomService {
         if(room.participants.size === 0) {
             this.rooms.delete(roomId);
         }
+    }
+
+    private generateUniqueRoomCode(length = 6): string {
+        let code = this.generateRoomCode(length);
+
+        while (Array.from(this.rooms.values()).some((room) => room.code === code)) {
+            code = this.generateRoomCode(length);
+        }
+        return code;
     }
 
     private generateRoomCode(length= 6): string {

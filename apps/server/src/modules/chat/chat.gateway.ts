@@ -4,19 +4,14 @@ import {
     SubscribeMessage,
     WebSocketGateway,
     WebSocketServer,
+    OnGatewayDisconnect,
+    WsException,
 } from "@nestjs/websockets";
-import { OnGatewayDisconnect} from "@nestjs/websockets";
 import { Server, Socket } from "socket.io";
 import { RoomService } from "../room/room.service";
-
-interface JoinRoomPayload {
-    roomId: string;
-}
-
-interface SendMessagePayload {
-    roomId: string;
-    message: string;
-}
+import { UsePipes, ValidationPipe } from "@nestjs/common";
+import { JoinRoomDto } from "./dto/join-room.dto";
+import { SendMessageDto } from "./dto/send-message.dto";
 
 @WebSocketGateway({
     cors: {
@@ -26,49 +21,74 @@ interface SendMessagePayload {
 })
 export class ChatGateway implements OnGatewayDisconnect {
     @WebSocketServer()
-    server: Server;
+    server!: Server;
 
     constructor(private readonly roomService: RoomService) {}
 
+    @UsePipes(
+        new ValidationPipe({
+            whitelist: true,
+            transform: true,
+            forbidNonWhitelisted: true,
+        }),
+    )
     @SubscribeMessage("room:join")
     handleJoinRoom(
-        @MessageBody() payload: JoinRoomPayload,
+        @MessageBody() payload: JoinRoomDto,
         @ConnectedSocket() client: Socket,
     ){
-        const room = this.roomService.getRoomById(payload.roomId);
+        try{
+            const room = this.roomService.getRoomById(payload.roomId);
 
-        client.join(room.id);
-        this.roomService.addParticipant(room.id, client.id);
+            client.join(room.id);
+            this.roomService.addParticipant(room.id, client.id);
 
-        this.server.to(room.id).emit("room:user-joined", {
-            socketId: client.id,
-            participantsCount: room.participants.size,
-        });
-        return {
-            event: "room:joined",
-            data: {
-                roomId: room.id,
-                code: room.code,
+            this.server.to(room.id).emit("room:user-joined", {
+                socketId: client.id,
                 participantsCount: room.participants.size,
-            },
-        };
+            });
+            return {
+                event: "room:joined",
+                data: {
+                    roomId: room.id,
+                    code: room.code,
+                    participantsCount: room.participants.size,
+                },
+            };
+        } catch(error) {
+            throw new WsException(
+                error instanceof Error ? error.message : "Failed to connect to the Room",
+            );
+        }
     }
-
+    @UsePipes(
+        new ValidationPipe({
+            whitelist: true,
+            transform: true,
+            forbidNonWhitelisted: true,
+        }),
+    )
     @SubscribeMessage("message:send")
     handleSendMessage(
-        @MessageBody() payload: SendMessagePayload,
+        @MessageBody() payload: SendMessageDto,
         @ConnectedSocket() client: Socket,
     ){
-        const room = this.roomService.getRoomById(payload.roomId);
+        try{
+            const room = this.roomService.getRoomById(payload.roomId);
 
-        this.server.to(room.id).emit("message:received", {
-            roomId: room.id,
-            senderId: client.id,
-            message: payload.message,
-            sendAt: new Date().toISOString(),
-        });
+            this.server.to(room.id).emit("message:received", {
+                roomId: room.id,
+                senderId: client.id,
+                message: payload.message,
+                sendAt: new Date().toISOString(),
+            });
 
-        return {ok : true };
+            return {ok : true };
+        } catch(error) {
+            throw new WsException(
+                error instanceof Error ? error.message : "Failed to send message",
+            );
+        }
     }
 
     async handleDisconnect(client: Socket) {
